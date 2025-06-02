@@ -105,7 +105,10 @@ app.post('/infura', async (c) => {
 app.post('/graph', async (c) => {
   try {
     const body = await c.req.json();
-    const url = `${c.env.GRAPH_BASE_URL}`;
+
+    //checks if the chain-id is 8453, if it is, use the mainnet graph url, if it is not, use the sepolia graph url
+    const chainId = c.req.header('chain-id');
+    const url = chainId === '8453' ? c.env.GRAPH_BASE_URL : c.env.GRAPH_BASE_SEPOLIA_URL;
     
     // Add request headers logging
     console.log('Graph request headers:', Object.fromEntries(c.req.raw.headers));
