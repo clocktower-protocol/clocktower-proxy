@@ -56,7 +56,7 @@ app.use(async (c, next) => {
 	c.header('Access-Control-Allow-Methods', 'GET, PUT, POST, DELETE, OPTIONS');
 	c.header(
 	  'Access-Control-Allow-Headers',
-	  'Content-Type, Authorization, Content-Length, X-Requested-With'
+	  'Content-Type, Authorization, Content-Length, X-Requested-With, chain-id'
 	);
   
 	// Handle OPTIONS requests
