@@ -107,6 +107,8 @@ app.post('/graph', async (c) => {
     const body = await c.req.json();
     const url = `${c.env.GRAPH_BASE_URL}`;
     
+    // Add request headers logging
+    console.log('Graph request headers:', Object.fromEntries(c.req.raw.headers));
     console.log('Graph request body:', body);
     console.log('Graph URL:', url);
 
