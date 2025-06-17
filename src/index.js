@@ -8,36 +8,36 @@ const CHAIN_CONFIGS = {
 	'8453': {
 		alchemy: {
 			url: 'https://base-mainnet.g.alchemy.com/v2/',
-			apiKey: process.env.ALCHEMY_API_KEY
+			apiKey: (c) => c.env.ALCHEMY_API_KEY
 		},
 		infura: {
 			url: 'https://base-mainnet.infura.io/v3/',
-			apiKey: process.env.INFURA_API_KEY
+			apiKey: (c) => c.env.INFURA_API_KEY
 		},
 		graph: {
-			url: process.env.GRAPH_BASE_URL,
-			apiKey: process.env.GRAPH_API_KEY
+			url: (c) => c.env.GRAPH_BASE_URL,
+			apiKey: (c) => c.env.GRAPH_API_KEY
 		}
 	},
 	// Base Sepolia (chainId: 84531)
 	'84531': {
 		alchemy: {
 			url: 'https://base-sepolia.g.alchemy.com/v2/',
-			apiKey: process.env.ALCHEMY_API_KEY
+			apiKey: (c) => c.env.ALCHEMY_API_KEY
 		},
 		infura: {
 			url: 'https://base-sepolia.infura.io/v3/',
-			apiKey: process.env.INFURA_API_KEY
+			apiKey: (c) => c.env.INFURA_API_KEY
 		},
 		graph: {
-			url: process.env.GRAPH_BASE_SEPOLIA_URL,
-			apiKey: process.env.GRAPH_API_KEY
+			url: (c) => c.env.GRAPH_BASE_SEPOLIA_URL,
+			apiKey: (c) => c.env.GRAPH_API_KEY
 		}
 	}
 };
 
 // Helper function to get chain config
-function getChainConfig(chainId, provider) {
+function getChainConfig(c, chainId, provider) {
 	const chainConfig = CHAIN_CONFIGS[chainId];
 	if (!chainConfig) {
 		throw new Error(`Unsupported chain ID: ${chainId}`);
@@ -48,7 +48,10 @@ function getChainConfig(chainId, provider) {
 		throw new Error(`Unsupported provider: ${provider} for chain ${chainId}`);
 	}
 	
-	return providerConfig;
+	return {
+		url: typeof providerConfig.url === 'function' ? providerConfig.url(c) : providerConfig.url,
+		apiKey: typeof providerConfig.apiKey === 'function' ? providerConfig.apiKey(c) : providerConfig.apiKey
+	};
 }
 
 // Helper: Proxy request to a provider (Alchemy or Infura)
@@ -143,14 +146,14 @@ app.use(async (c, next) => {
 // Route: POST /alchemy/*
 app.post('/alchemy', async (c) => {
 	const chainId = c.req.header('chain-id') || '84531'; // Default to Sepolia
-	const config = getChainConfig(chainId, 'alchemy');
+	const config = getChainConfig(c, chainId, 'alchemy');
 	return proxyRequest(c, config.url, config.apiKey, '/alchemy');
 });
 
 // Route: POST /infura/*
 app.post('/infura', async (c) => {
 	const chainId = c.req.header('chain-id') || '84531'; // Default to Sepolia
-	const config = getChainConfig(chainId, 'infura');
+	const config = getChainConfig(c, chainId, 'infura');
 	return proxyRequest(c, config.url, config.apiKey, '/infura');
 });
 
@@ -159,7 +162,7 @@ app.post('/graph', async (c) => {
 	try {
 		const body = await c.req.json();
 		const chainId = c.req.header('chain-id') || '84531'; // Default to Sepolia
-		const config = getChainConfig(chainId, 'graph');
+		const config = getChainConfig(c, chainId, 'graph');
 		
 		// Add request headers logging
 		console.log('Graph request headers:', Object.fromEntries(c.req.raw.headers));
