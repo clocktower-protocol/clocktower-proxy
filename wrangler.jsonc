@@ -30,8 +30,6 @@
 	"vars": { 
 		"ALCHEMY_BASE_SEPOLIA_URL" : "https://base-sepolia.g.alchemy.com/v2/",
 		"INFURA_BASE_SEPOLIA_URL" : "https://base-sepolia.infura.io/v3/",
-		"ALLOWED_DOMAIN" : "http://localhost:3000",
-		"ALLOWED_DOMAIN2" : "https://app.clocktower.finance",
 	 },
 	
 	
