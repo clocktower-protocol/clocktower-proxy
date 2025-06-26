@@ -124,8 +124,8 @@ app.use(async (c, next) => {
 app.use(async (c, next) => {
 	const origin = c.req.header('Origin');
 	const referer = c.req.header('Referer');
-	const allowedDomains = c.env.ALLOWED_DOMAINS; // Comma-separated list
-	const allowedLocalhostIPs = c.env.ALLOWED_LOCALHOST_IPS; // Comma-separated list
+	const allowedDomains = c.env.ALLOWED_DOMAINS;
+	const allowedGatewayIPs = c.env.ALLOWED_GATEWAY_IPS; // Comma-separated list
 
 	// Skip domain check for OPTIONS requests to allow CORS preflight
 	if (c.req.method === 'OPTIONS') {
@@ -142,21 +142,21 @@ app.use(async (c, next) => {
 	);
 
 	if (isLocalhost) {
-		// Get client IP address from Cloudflare headers
-		const clientIP = c.req.header('CF-Connecting-IP') || 'unknown';
+		// Get the real client IP (the gateway that sent the request to Cloudflare)
+		const gatewayIP = c.req.header('CF-Connecting-IP') || 'unknown';
 		
-		console.log(`Localhost request from IP: ${clientIP}`);
+		console.log(`Localhost request from gateway IP: ${gatewayIP}`);
 		
-		// Parse allowed IPs from environment variable
-		const allowedIPs = allowedLocalhostIPs ? allowedLocalhostIPs.split(',').map(ip => ip.trim()) : [];
+		// Parse allowed gateway IPs from environment variable
+		const allowedIPs = allowedGatewayIPs ? allowedGatewayIPs.split(',').map(ip => ip.trim()) : [];
 		
-		// Check if the IP is in the allowed list
-		if (allowedIPs.includes(clientIP)) {
-			console.log(`Allowing localhost access from authorized IP: ${clientIP}`);
+		// Check if the gateway IP is in the allowed list
+		if (allowedIPs.includes(gatewayIP)) {
+			console.log(`Allowing localhost access from authorized gateway IP: ${gatewayIP}`);
 			return next();
 		} else {
-			console.log(`Denying localhost access from unauthorized IP: ${clientIP}`);
-			return c.json({ error: 'Access denied: Localhost access not allowed from this IP address' }, 403);
+			console.log(`Denying localhost access from unauthorized gateway IP: ${gatewayIP}`);
+			return c.json({ error: 'Access denied: Localhost access not allowed from this gateway IP address' }, 403);
 		}
 	}
 
@@ -165,7 +165,7 @@ app.use(async (c, next) => {
 	
 	// Check if origin is in the allowed domains list
 	if (origin && allowedDomainList.includes(origin)) {
-		return next(); // Proceed to next middleware or handler
+		return next();
 	}
 	
 	// Check if referer starts with any allowed domain
