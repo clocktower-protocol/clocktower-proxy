@@ -124,8 +124,8 @@ app.use(async (c, next) => {
 app.use(async (c, next) => {
 	const origin = c.req.header('Origin');
 	const referer = c.req.header('Referer');
-	const allowedDomain = c.env.ALLOWED_DOMAIN;
-	const allowedDomain2 = c.env.ALLOWED_DOMAIN2;
+	const allowedDomains = c.env.ALLOWED_DOMAINS; // Comma-separated list
+	const allowedLocalhostIPs = c.env.ALLOWED_LOCALHOST_IPS; // Comma-separated list
 
 	// Skip domain check for OPTIONS requests to allow CORS preflight
 	if (c.req.method === 'OPTIONS') {
@@ -133,10 +133,43 @@ app.use(async (c, next) => {
 		return next();
 	}
 
-	if (origin && (origin === allowedDomain || origin === allowedDomain2)) {
+	// Check if request is from localhost
+	const isLocalhost = origin && (
+		origin.includes('localhost') || 
+		origin.includes('127.0.0.1') ||
+		origin.startsWith('http://localhost') ||
+		origin.startsWith('https://localhost')
+	);
+
+	if (isLocalhost) {
+		// Get client IP address from Cloudflare headers
+		const clientIP = c.req.header('CF-Connecting-IP') || 'unknown';
+		
+		console.log(`Localhost request from IP: ${clientIP}`);
+		
+		// Parse allowed IPs from environment variable
+		const allowedIPs = allowedLocalhostIPs ? allowedLocalhostIPs.split(',').map(ip => ip.trim()) : [];
+		
+		// Check if the IP is in the allowed list
+		if (allowedIPs.includes(clientIP)) {
+			console.log(`Allowing localhost access from authorized IP: ${clientIP}`);
+			return next();
+		} else {
+			console.log(`Denying localhost access from unauthorized IP: ${clientIP}`);
+			return c.json({ error: 'Access denied: Localhost access not allowed from this IP address' }, 403);
+		}
+	}
+
+	// Parse allowed domains from environment variable
+	const allowedDomainList = allowedDomains ? allowedDomains.split(',').map(domain => domain.trim()) : [];
+	
+	// Check if origin is in the allowed domains list
+	if (origin && allowedDomainList.includes(origin)) {
 		return next(); // Proceed to next middleware or handler
 	}
-	if (referer && referer.startsWith(allowedDomain2)) {
+	
+	// Check if referer starts with any allowed domain
+	if (referer && allowedDomainList.some(domain => referer.startsWith(domain))) {
 		return next();
 	}
 
