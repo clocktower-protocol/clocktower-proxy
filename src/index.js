@@ -2,6 +2,21 @@ import { Hono } from 'hono';
 
 const app = new Hono();
 
+// Enhanced size validation
+function validateRequestSize(c) {
+	const contentLength = c.req.header('content-length');
+	const maxSize = 1024 * 1024; // 1MB
+	
+	if (contentLength) {
+		const size = parseInt(contentLength, 10);
+		if (isNaN(size) || size > maxSize) {
+			return { valid: false, error: `Request too large. Maximum size: ${maxSize / (1024 * 1024)}MB` };
+		}
+	}
+	
+	return { valid: true };
+}
+
 // Input validation functions
 function validateChainId(chainId) {
 	if (!chainId || typeof chainId !== 'string') {
@@ -57,10 +72,36 @@ function validateRequestBody(body) {
 		return { valid: false, error: 'Request body contains circular references or invalid JSON' };
 	}
 	
-	// Limit body size (rough estimate)
+	// Enhanced size limit with better estimation
 	const bodyString = JSON.stringify(body);
-	if (bodyString.length > 1024 * 1024) { // 1MB limit
-		return { valid: false, error: 'Request body too large (max 1MB)' };
+	const sizeInBytes = new TextEncoder().encode(bodyString).length;
+	const maxSize = 1024 * 1024; // 1MB
+	
+	if (sizeInBytes > maxSize) {
+		return { 
+			valid: false, 
+			error: `Request body too large (${Math.round(sizeInBytes / 1024)}KB). Maximum size: ${maxSize / (1024 * 1024)}MB` 
+		};
+	}
+	
+	// Check for deeply nested objects (prevent DoS)
+	const maxDepth = 10;
+	function checkDepth(obj, depth = 0) {
+		if (depth > maxDepth) {
+			return false;
+		}
+		if (typeof obj === 'object' && obj !== null) {
+			for (const key in obj) {
+				if (!checkDepth(obj[key], depth + 1)) {
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+	
+	if (!checkDepth(body)) {
+		return { valid: false, error: 'Request body too deeply nested (max 10 levels)' };
 	}
 	
 	return { valid: true, body };
@@ -194,39 +235,69 @@ async function proxyRequest(c, baseUrl, apiKey, prefix) {
 		console.log(`Request path for ${prefix}:`, path);
 		console.log(`URL for ${prefix}:`, urlValidation.url);
 
-		const response = await fetch(urlValidation.url, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(bodyValidation.body),
-		});
-
-		// Log response details (without sensitive data)
-		console.log(`${prefix} Response status:`, response.status);
-
-		// Try to parse response body
-		let data;
+		// Add timeout to fetch request
+		const controller = new AbortController();
+		const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+		
 		try {
-			data = await response.text();
-			data = JSON.parse(data);
+			const response = await fetch(urlValidation.url, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(bodyValidation.body),
+				signal: controller.signal
+			});
+			
+			clearTimeout(timeoutId);
+			
+			// Log response details (without sensitive data)
+			console.log(`${prefix} Response status:`, response.status);
+
+			// Try to parse response body
+			let data;
+			try {
+				data = await response.text();
+				data = JSON.parse(data);
+			} catch (error) {
+				console.error(`${prefix} JSON parsing error:`, error);
+				return c.json(
+					{ error: `${prefix} API returned invalid JSON` },
+					response.status || 500
+				);
+			}
+
+			if (!response.ok) {
+				console.log(`${prefix} API error response:`, data);
+				return c.json({ error: `${prefix} API error`, details: data }, response.status);
+			}
+
+			return c.json(data, 200);
 		} catch (error) {
-			console.error(`${prefix} JSON parsing error:`, error);
-			return c.json(
-				{ error: `${prefix} API returned invalid JSON` },
-				response.status || 500
-			);
+			clearTimeout(timeoutId);
+			if (error.name === 'AbortError') {
+				return c.json({ error: 'Request timeout' }, 408);
+			}
+			throw error;
 		}
-
-		if (!response.ok) {
-			console.log(`${prefix} API error response:`, data);
-			return c.json({ error: `${prefix} API error`, details: data }, response.status);
-		}
-
-		return c.json(data, 200);
 	} catch (error) {
 		console.error(`${prefix} Proxy error:`, error);
 		return c.json({ error: 'Internal Server Error' }, 500);
 	}
 }
+
+// Request size validation middleware
+app.use(async (c, next) => {
+	// Skip size validation for OPTIONS requests
+	if (c.req.method === 'OPTIONS') {
+		return next();
+	}
+	
+	const sizeValidation = validateRequestSize(c);
+	if (!sizeValidation.valid) {
+		return c.json({ error: sizeValidation.error }, 413); // Payload Too Large
+	}
+	
+	await next();
+});
 
 // Middleware: CORS and domain validation combined
 app.use(async (c, next) => {
@@ -434,38 +505,53 @@ app.post('/graph', async (c) => {
 
 		console.log('Graph URL:', urlValidation.url);
 
-		const response = await fetch(urlValidation.url, {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				'Authorization': `Bearer ${config.apiKey || ''}`,
-				'Accept': 'application/json',
-			},
-			body: JSON.stringify(bodyValidation.body),
-		});
-
-		// Log response details (without sensitive data)
-		console.log('Graph Response status:', response.status);
-
-		// Try to parse response body
-		let data;
+		// Add timeout to fetch request
+		const controller = new AbortController();
+		const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+		
 		try {
-			data = await response.text();
-			data = JSON.parse(data);
+			const response = await fetch(urlValidation.url, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					'Authorization': `Bearer ${config.apiKey || ''}`,
+					'Accept': 'application/json',
+				},
+				body: JSON.stringify(bodyValidation.body),
+				signal: controller.signal
+			});
+			
+			clearTimeout(timeoutId);
+			
+			// Log response details (without sensitive data)
+			console.log('Graph Response status:', response.status);
+
+			// Try to parse response body
+			let data;
+			try {
+				data = await response.text();
+				data = JSON.parse(data);
+			} catch (error) {
+				console.error('Graph JSON parsing error:', error);
+				return c.json(
+					{ error: 'Graph API returned invalid JSON' },
+					response.status || 500
+				);
+			}
+
+			if (!response.ok) {
+				console.log('Graph API error response:', data);
+				return c.json({ error: 'Graph API error', details: data }, response.status);
+			}
+
+			return c.json(data, 200);
 		} catch (error) {
-			console.error('Graph JSON parsing error:', error);
-			return c.json(
-				{ error: 'Graph API returned invalid JSON' },
-				response.status || 500
-			);
+			clearTimeout(timeoutId);
+			if (error.name === 'AbortError') {
+				return c.json({ error: 'Request timeout' }, 408);
+			}
+			throw error;
 		}
-
-		if (!response.ok) {
-			console.log('Graph API error response:', data);
-			return c.json({ error: 'Graph API error', details: data }, response.status);
-		}
-
-		return c.json(data, 200);
 	} catch (error) {
 		console.error('Graph Proxy error:', error);
 		return c.json({ error: 'Internal Server Error' }, 500);
