@@ -149,16 +149,16 @@ app.use(async (c, next) => {
 			console.log('Responding to OPTIONS request with 200 for allowed origin:', allowedOrigin);
 			return c.body(null, 200);
 		} else {
-			// For unauthorized origins, still set CORS headers but return 403
-			// This allows the browser to understand the CORS policy
+			// For unauthorized origins, still set CORS headers but return 200 for OPTIONS
+			// The actual request will be blocked later with 403
 			c.header('Access-Control-Allow-Origin', origin || '*');
 			c.header('Access-Control-Allow-Methods', 'GET, PUT, POST, DELETE, OPTIONS');
 			c.header(
 				'Access-Control-Allow-Headers',
 				'Content-Type, Authorization, Content-Length, X-Requested-With, chain-id'
 			);
-			console.log('Rejecting OPTIONS request from unauthorized origin:', origin);
-			return c.json({ error: 'CORS not allowed' }, 403);
+			console.log('Responding to OPTIONS request with 200 for unauthorized origin (will block actual request):', origin);
+			return c.body(null, 200);
 		}
 	}
 
