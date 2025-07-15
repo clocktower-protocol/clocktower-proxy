@@ -2,6 +2,102 @@ import { Hono } from 'hono';
 
 const app = new Hono();
 
+// Input validation functions
+function validateChainId(chainId) {
+	if (!chainId || typeof chainId !== 'string') {
+		return { valid: false, error: 'Chain ID must be a non-empty string' };
+	}
+	
+	// Only allow numeric chain IDs
+	if (!/^\d+$/.test(chainId)) {
+		return { valid: false, error: 'Chain ID must contain only digits' };
+	}
+	
+	// Check if chain ID is supported
+	const supportedChainIds = ['8453', '84532'];
+	if (!supportedChainIds.includes(chainId)) {
+		return { valid: false, error: `Unsupported chain ID: ${chainId}. Supported: ${supportedChainIds.join(', ')}` };
+	}
+	
+	return { valid: true, chainId };
+}
+
+function validateRequestPath(path) {
+	if (!path || typeof path !== 'string') {
+		return { valid: false, error: 'Path must be a non-empty string' };
+	}
+	
+	// Prevent path traversal attacks
+	if (path.includes('..') || path.includes('//') || path.includes('\\')) {
+		return { valid: false, error: 'Invalid path: contains path traversal characters' };
+	}
+	
+	// Only allow alphanumeric, hyphens, underscores, and forward slashes
+	if (!/^[a-zA-Z0-9\/\-_]+$/.test(path)) {
+		return { valid: false, error: 'Invalid path: contains disallowed characters' };
+	}
+	
+	return { valid: true, path };
+}
+
+function validateRequestBody(body) {
+	if (!body || typeof body !== 'object') {
+		return { valid: false, error: 'Request body must be a valid JSON object' };
+	}
+	
+	// Check for circular references
+	try {
+		JSON.stringify(body);
+	} catch (error) {
+		return { valid: false, error: 'Request body contains circular references or invalid JSON' };
+	}
+	
+	// Limit body size (rough estimate)
+	const bodyString = JSON.stringify(body);
+	if (bodyString.length > 1024 * 1024) { // 1MB limit
+		return { valid: false, error: 'Request body too large (max 1MB)' };
+	}
+	
+	return { valid: true, body };
+}
+
+function validateHeaders(headers) {
+	const validation = { valid: true, errors: [] };
+	
+	// Validate Content-Type
+	const contentType = headers.get('content-type');
+	if (contentType && !contentType.includes('application/json')) {
+		validation.errors.push('Content-Type must be application/json');
+		validation.valid = false;
+	}
+	
+	// Validate chain-id header if present
+	const chainId = headers.get('chain-id');
+	if (chainId) {
+		const chainValidation = validateChainId(chainId);
+		if (!chainValidation.valid) {
+			validation.errors.push(`Invalid chain-id header: ${chainValidation.error}`);
+			validation.valid = false;
+		}
+	}
+	
+	return validation;
+}
+
+function sanitizeUrl(url) {
+	// Basic URL validation and sanitization
+	try {
+		const urlObj = new URL(url);
+		// Only allow HTTPS URLs (except for localhost development)
+		if (urlObj.protocol !== 'https:' && !urlObj.hostname.includes('localhost')) {
+			return { valid: false, error: 'Only HTTPS URLs are allowed (except localhost)' };
+		}
+		return { valid: true, url: urlObj.toString() };
+	} catch (error) {
+		return { valid: false, error: 'Invalid URL format' };
+	}
+}
+
 // Chain configurations mapping
 const CHAIN_CONFIGS = {
 	// Base Mainnet (chainId: 8453)
@@ -54,37 +150,63 @@ function getChainConfig(c, chainId, provider) {
 	};
 }
 
-// Helper: Proxy request to a provider (Alchemy or Infura)
+// Helper: Proxy request to a provider (Alchemy or Infura) with validation
 async function proxyRequest(c, baseUrl, apiKey, prefix) {
 	try {
-		const body = await c.req.json();
+		// Validate request body
+		let body;
+		try {
+			body = await c.req.json();
+		} catch (error) {
+			return c.json({ error: 'Invalid JSON in request body' }, 400);
+		}
+		
+		const bodyValidation = validateRequestBody(body);
+		if (!bodyValidation.valid) {
+			return c.json({ error: bodyValidation.error }, 400);
+		}
+		
+		// Validate and sanitize path
 		const path = c.req.path.replace(prefix, '');
+		const pathValidation = validateRequestPath(path);
+		if (!pathValidation.valid) {
+			return c.json({ error: pathValidation.error }, 400);
+		}
+		
+		// Validate and sanitize URL
 		const url = `${baseUrl}${apiKey}${path}`;
+		const urlValidation = sanitizeUrl(url);
+		if (!urlValidation.valid) {
+			return c.json({ error: urlValidation.error }, 400);
+		}
+		
+		// Validate headers
+		const headerValidation = validateHeaders(c.req.raw.headers);
+		if (!headerValidation.valid) {
+			return c.json({ error: `Header validation failed: ${headerValidation.errors.join(', ')}` }, 400);
+		}
 
 		console.log(`Request path for ${prefix}:`, path);
-		console.log(`URL for ${prefix}:`, url);
+		console.log(`URL for ${prefix}:`, urlValidation.url);
 
-		const response = await fetch(url, {
+		const response = await fetch(urlValidation.url, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(body),
+			body: JSON.stringify(bodyValidation.body),
 		});
 
-		// Log response details
+		// Log response details (without sensitive data)
 		console.log(`${prefix} Response status:`, response.status);
-		console.log(`${prefix} Response headers:`, Object.fromEntries(response.headers));
 
 		// Try to parse response body
 		let data;
-		const contentType = response.headers.get('Content-Type') || '';
 		try {
-			data = await response.text(); // Get raw text first
-			console.log(`${prefix} Raw response:`, data);
-			data = JSON.parse(data); // Try parsing as JSON
+			data = await response.text();
+			data = JSON.parse(data);
 		} catch (error) {
 			console.error(`${prefix} JSON parsing error:`, error);
 			return c.json(
-				{ error: `${prefix} API returned invalid JSON`, details: data },
+				{ error: `${prefix} API returned invalid JSON` },
 				response.status || 500
 			);
 		}
@@ -97,7 +219,7 @@ async function proxyRequest(c, baseUrl, apiKey, prefix) {
 		return c.json(data, 200);
 	} catch (error) {
 		console.error(`${prefix} Proxy error:`, error);
-		return c.json({ error: error.message || 'Internal Server Error' }, 500);
+		return c.json({ error: 'Internal Server Error' }, 500);
 	}
 }
 
@@ -232,56 +354,103 @@ app.use(async (c, next) => {
 	await next();
 });
 
-// Route: POST /alchemy/*
+// Route: POST /alchemy/* with validation
 app.post('/alchemy', async (c) => {
-	const chainId = c.req.header('chain-id') || '84532'; // Default to Sepolia
-	const config = getChainConfig(c, chainId, 'alchemy');
-	return proxyRequest(c, config.url, config.apiKey, '/alchemy');
+	try {
+		// Validate chain-id header
+		const chainId = c.req.header('chain-id') || '84532';
+		const chainValidation = validateChainId(chainId);
+		if (!chainValidation.valid) {
+			return c.json({ error: chainValidation.error }, 400);
+		}
+		
+		const config = getChainConfig(c, chainValidation.chainId, 'alchemy');
+		return proxyRequest(c, config.url, config.apiKey, '/alchemy');
+	} catch (error) {
+		console.error('Alchemy route error:', error);
+		return c.json({ error: 'Internal Server Error' }, 500);
+	}
 });
 
-// Route: POST /infura/*
+// Route: POST /infura/* with validation
 app.post('/infura', async (c) => {
-	const chainId = c.req.header('chain-id') || '84532'; // Default to Sepolia
-	const config = getChainConfig(c, chainId, 'infura');
-	return proxyRequest(c, config.url, config.apiKey, '/infura');
+	try {
+		// Validate chain-id header
+		const chainId = c.req.header('chain-id') || '84532';
+		const chainValidation = validateChainId(chainId);
+		if (!chainValidation.valid) {
+			return c.json({ error: chainValidation.error }, 400);
+		}
+		
+		const config = getChainConfig(c, chainValidation.chainId, 'infura');
+		return proxyRequest(c, config.url, config.apiKey, '/infura');
+	} catch (error) {
+		console.error('Infura route error:', error);
+		return c.json({ error: 'Internal Server Error' }, 500);
+	}
 });
 
-// Route: POST /graph/*
+// Route: POST /graph/* with validation
 app.post('/graph', async (c) => {
 	try {
-		const body = await c.req.json();
-		const chainId = c.req.header('chain-id') || '84532'; // Default to Sepolia
-		const config = getChainConfig(c, chainId, 'graph');
+		// Validate request body
+		let body;
+		try {
+			body = await c.req.json();
+		} catch (error) {
+			return c.json({ error: 'Invalid JSON in request body' }, 400);
+		}
 		
-		// Add request headers logging
-		console.log('Graph request headers:', Object.fromEntries(c.req.raw.headers));
-		console.log('Graph request body:', body);
-		console.log('Graph URL:', config.url);
+		const bodyValidation = validateRequestBody(body);
+		if (!bodyValidation.valid) {
+			return c.json({ error: bodyValidation.error }, 400);
+		}
+		
+		// Validate chain-id header
+		const chainId = c.req.header('chain-id') || '84532';
+		const chainValidation = validateChainId(chainId);
+		if (!chainValidation.valid) {
+			return c.json({ error: chainValidation.error }, 400);
+		}
+		
+		const config = getChainConfig(c, chainValidation.chainId, 'graph');
+		
+		// Validate and sanitize Graph URL
+		const urlValidation = sanitizeUrl(config.url);
+		if (!urlValidation.valid) {
+			return c.json({ error: urlValidation.error }, 400);
+		}
+		
+		// Validate headers
+		const headerValidation = validateHeaders(c.req.raw.headers);
+		if (!headerValidation.valid) {
+			return c.json({ error: `Header validation failed: ${headerValidation.errors.join(', ')}` }, 400);
+		}
 
-		const response = await fetch(config.url, {
+		console.log('Graph URL:', urlValidation.url);
+
+		const response = await fetch(urlValidation.url, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json',
 				'Authorization': `Bearer ${config.apiKey || ''}`,
 				'Accept': 'application/json',
 			},
-			body: JSON.stringify(body),
+			body: JSON.stringify(bodyValidation.body),
 		});
 
-		// Log response details
+		// Log response details (without sensitive data)
 		console.log('Graph Response status:', response.status);
-		console.log('Graph Response headers:', Object.fromEntries(response.headers));
 
 		// Try to parse response body
 		let data;
 		try {
 			data = await response.text();
-			console.log('Graph Raw response:', data);
 			data = JSON.parse(data);
 		} catch (error) {
 			console.error('Graph JSON parsing error:', error);
 			return c.json(
-				{ error: 'Graph API returned invalid JSON', details: data },
+				{ error: 'Graph API returned invalid JSON' },
 				response.status || 500
 			);
 		}
@@ -294,7 +463,7 @@ app.post('/graph', async (c) => {
 		return c.json(data, 200);
 	} catch (error) {
 		console.error('Graph Proxy error:', error);
-		return c.json({ error: error.message || 'Internal Server Error' }, 500);
+		return c.json({ error: 'Internal Server Error' }, 500);
 	}
 });
 
