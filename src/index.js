@@ -23,8 +23,13 @@ function validateChainId(chainId) {
 }
 
 function validateRequestPath(path) {
-	if (!path || typeof path !== 'string') {
-		return { valid: false, error: 'Path must be a non-empty string' };
+	if (typeof path !== 'string') {
+		return { valid: false, error: 'Path must be a string' };
+	}
+	
+	// Allow empty paths for base endpoints
+	if (path === '') {
+		return { valid: true, path: '' };
 	}
 	
 	// Prevent path traversal attacks
