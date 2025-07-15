@@ -101,38 +101,62 @@ async function proxyRequest(c, baseUrl, apiKey, prefix) {
 	}
 }
 
-// Middleware: CORS and OPTIONS handling
-app.use(async (c, next) => {
-	// Set CORS headers for all responses
-	c.header('Access-Control-Allow-Origin', '*');
-	c.header('Access-Control-Allow-Methods', 'GET, PUT, POST, DELETE, OPTIONS');
-	c.header(
-		'Access-Control-Allow-Headers',
-		'Content-Type, Authorization, Content-Length, X-Requested-With, chain-id'
-	);
-
-	// Handle OPTIONS requests
-	if (c.req.method === 'OPTIONS') {
-		console.log('Responding to OPTIONS request with 200');
-		return c.body(null, 200); 
-	}
-
-	await next();
-});
-
-// Middleware: Restrict to allowed domains
+// Middleware: CORS and domain validation combined
 app.use(async (c, next) => {
 	const origin = c.req.header('Origin');
 	const referer = c.req.header('Referer');
 	const allowedDomains = c.env.ALLOWED_DOMAINS;
-	const allowedGatewayIPs = c.env.ALLOWED_GATEWAY_IPS; // Comma-separated list
+	const allowedGatewayIPs = c.env.ALLOWED_GATEWAY_IPS;
 
-	// Skip domain check for OPTIONS requests to allow CORS preflight
+	// Handle OPTIONS requests (CORS preflight)
 	if (c.req.method === 'OPTIONS') {
-		console.log('Responding to OPTIONS request with 200');
-		return next();
+		// For OPTIONS, we need to check if the origin is allowed
+		let allowedOrigin = null;
+		
+		// Check if request is from localhost
+		const isLocalhost = origin && (
+			origin.includes('localhost') || 
+			origin.includes('127.0.0.1') ||
+			origin.startsWith('http://localhost') ||
+			origin.startsWith('https://localhost')
+		);
+
+		if (isLocalhost) {
+			// For localhost, check gateway IP
+			const gatewayIP = c.req.header('CF-Connecting-IP') || 'unknown';
+			const allowedIPs = allowedGatewayIPs ? allowedGatewayIPs.split(',').map(ip => ip.trim()) : [];
+			
+			if (allowedIPs.includes(gatewayIP)) {
+				allowedOrigin = origin; // Allow the specific localhost origin
+			}
+		} else {
+			// Check if origin is in allowed domains
+			const allowedDomainList = allowedDomains ? allowedDomains.split(',').map(domain => domain.trim()) : [];
+			if (origin && allowedDomainList.includes(origin)) {
+				allowedOrigin = origin; // Allow the specific origin
+			}
+		}
+
+		// Set CORS headers based on validation
+		if (allowedOrigin) {
+			c.header('Access-Control-Allow-Origin', allowedOrigin);
+			c.header('Access-Control-Allow-Methods', 'GET, PUT, POST, DELETE, OPTIONS');
+			c.header(
+				'Access-Control-Allow-Headers',
+				'Content-Type, Authorization, Content-Length, X-Requested-With, chain-id'
+			);
+			console.log('Responding to OPTIONS request with 200 for allowed origin:', allowedOrigin);
+			return c.body(null, 200);
+		} else {
+			// Reject OPTIONS request from unauthorized origin
+			console.log('Rejecting OPTIONS request from unauthorized origin:', origin);
+			return c.json({ error: 'CORS not allowed' }, 403);
+		}
 	}
 
+	// For non-OPTIONS requests, set CORS headers and validate domain
+	let allowedOrigin = null;
+	
 	// Check if request is from localhost
 	const isLocalhost = origin && (
 		origin.includes('localhost') || 
@@ -153,27 +177,37 @@ app.use(async (c, next) => {
 		// Check if the gateway IP is in the allowed list
 		if (allowedIPs.includes(gatewayIP)) {
 			console.log(`Allowing localhost access from authorized gateway IP: ${gatewayIP}`);
-			return next();
+			allowedOrigin = origin;
 		} else {
 			console.log(`Denying localhost access from unauthorized gateway IP: ${gatewayIP}`);
 			return c.json({ error: 'Access denied: Localhost access not allowed from this gateway IP address' }, 403);
 		}
+	} else {
+		// Parse allowed domains from environment variable
+		const allowedDomainList = allowedDomains ? allowedDomains.split(',').map(domain => domain.trim()) : [];
+		
+		// Check if origin is in the allowed domains list
+		if (origin && allowedDomainList.includes(origin)) {
+			allowedOrigin = origin;
+		} else {
+			// Check if referer starts with any allowed domain (fallback)
+			if (referer && allowedDomainList.some(domain => referer.startsWith(domain))) {
+				allowedOrigin = origin || '*'; // Use origin if available, otherwise wildcard
+			} else {
+				return c.json({ error: 'Access denied: Request not from allowed domain' }, 403);
+			}
+		}
 	}
 
-	// Parse allowed domains from environment variable
-	const allowedDomainList = allowedDomains ? allowedDomains.split(',').map(domain => domain.trim()) : [];
-	
-	// Check if origin is in the allowed domains list
-	if (origin && allowedDomainList.includes(origin)) {
-		return next();
-	}
-	
-	// Check if referer starts with any allowed domain
-	if (referer && allowedDomainList.some(domain => referer.startsWith(domain))) {
-		return next();
-	}
+	// Set CORS headers for the validated origin
+	c.header('Access-Control-Allow-Origin', allowedOrigin);
+	c.header('Access-Control-Allow-Methods', 'GET, PUT, POST, DELETE, OPTIONS');
+	c.header(
+		'Access-Control-Allow-Headers',
+		'Content-Type, Authorization, Content-Length, X-Requested-With, chain-id'
+	);
 
-	return c.json({ error: 'Access denied: Request not from allowed domain' }, 403);
+	await next();
 });
 
 // Route: POST /alchemy/*
