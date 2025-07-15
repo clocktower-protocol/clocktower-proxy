@@ -137,7 +137,8 @@ app.use(async (c, next) => {
 			}
 		}
 
-		// Set CORS headers based on validation
+		// Always set CORS headers for OPTIONS requests, even if origin is not allowed
+		// This prevents the browser from showing "No 'Access-Control-Allow-Origin' header" error
 		if (allowedOrigin) {
 			c.header('Access-Control-Allow-Origin', allowedOrigin);
 			c.header('Access-Control-Allow-Methods', 'GET, PUT, POST, DELETE, OPTIONS');
@@ -148,7 +149,14 @@ app.use(async (c, next) => {
 			console.log('Responding to OPTIONS request with 200 for allowed origin:', allowedOrigin);
 			return c.body(null, 200);
 		} else {
-			// Reject OPTIONS request from unauthorized origin
+			// For unauthorized origins, still set CORS headers but return 403
+			// This allows the browser to understand the CORS policy
+			c.header('Access-Control-Allow-Origin', origin || '*');
+			c.header('Access-Control-Allow-Methods', 'GET, PUT, POST, DELETE, OPTIONS');
+			c.header(
+				'Access-Control-Allow-Headers',
+				'Content-Type, Authorization, Content-Length, X-Requested-With, chain-id'
+			);
 			console.log('Rejecting OPTIONS request from unauthorized origin:', origin);
 			return c.json({ error: 'CORS not allowed' }, 403);
 		}
@@ -180,6 +188,13 @@ app.use(async (c, next) => {
 			allowedOrigin = origin;
 		} else {
 			console.log(`Denying localhost access from unauthorized gateway IP: ${gatewayIP}`);
+			// Set CORS headers even for rejected requests
+			c.header('Access-Control-Allow-Origin', origin || '*');
+			c.header('Access-Control-Allow-Methods', 'GET, PUT, POST, DELETE, OPTIONS');
+			c.header(
+				'Access-Control-Allow-Headers',
+				'Content-Type, Authorization, Content-Length, X-Requested-With, chain-id'
+			);
 			return c.json({ error: 'Access denied: Localhost access not allowed from this gateway IP address' }, 403);
 		}
 	} else {
@@ -194,6 +209,13 @@ app.use(async (c, next) => {
 			if (referer && allowedDomainList.some(domain => referer.startsWith(domain))) {
 				allowedOrigin = origin || '*'; // Use origin if available, otherwise wildcard
 			} else {
+				// Set CORS headers even for rejected requests
+				c.header('Access-Control-Allow-Origin', origin || '*');
+				c.header('Access-Control-Allow-Methods', 'GET, PUT, POST, DELETE, OPTIONS');
+				c.header(
+					'Access-Control-Allow-Headers',
+					'Content-Type, Authorization, Content-Length, X-Requested-With, chain-id'
+				);
 				return c.json({ error: 'Access denied: Request not from allowed domain' }, 403);
 			}
 		}
