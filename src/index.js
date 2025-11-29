@@ -29,7 +29,7 @@ function validateChainId(chainId) {
 	}
 	
 	// Check if chain ID is supported
-	const supportedChainIds = ['8453', '84532'];
+	const supportedChainIds = ['8453', '84532', '1'];
 	if (!supportedChainIds.includes(chainId)) {
 		return { valid: false, error: `Unsupported chain ID: ${chainId}. Supported: ${supportedChainIds.join(', ')}` };
 	}
@@ -174,6 +174,17 @@ const CHAIN_CONFIGS = {
 		graph: {
 			url: (c) => c.env.GRAPH_BASE_SEPOLIA_URL,
 			apiKey: (c) => c.env.GRAPH_API_KEY
+		}
+	},
+	// Ethereum Mainnet (chainId: 1)
+	'1': {
+		alchemy: {
+			url: 'https://eth-mainnet.g.alchemy.com/v2/',
+			apiKey: (c) => c.env.ALCHEMY_API_KEY
+		},
+		infura: {
+			url: 'https://mainnet.infura.io/v3/',
+			apiKey: (c) => c.env.INFURA_API_KEY
 		}
 	}
 };
