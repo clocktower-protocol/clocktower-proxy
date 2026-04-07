@@ -1,0 +1,8 @@
+# Copy to .dev.vars for `wrangler dev` / local Vitest. Use real values locally; never commit .dev.vars.
+ALCHEMY_API_KEY=your-alchemy-key
+INFURA_API_KEY=your-infura-key
+GRAPH_API_KEY=your-graph-key
+GRAPH_BASE_URL=https://your-graph-endpoint.example/subgraph
+GRAPH_BASE_SEPOLIA_URL=https://your-graph-sepolia-endpoint.example/subgraph
+ALLOWED_DOMAINS=https://your-app.example
+ALLOWED_GATEWAY_IPS=127.0.0.1
