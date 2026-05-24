@@ -1,0 +1,26 @@
+# --- Secrets (hard block; do not rely on .gitignore alone) ---
+.env
+.env.*
+!.env.example
+.dev.vars
+!.dev.vars.example
+
+# --- Dependencies & VCS ---
+node_modules/
+.git/
+
+# --- Build outputs ---
+dist/
+build/
+
+# --- Cloudflare local state ---
+.wrangler/
+
+# --- Lockfiles & logs ---
+package-lock.json
+*.log
+
+# --- IDE / OS noise ---
+.vscode/
+.idea/
+.DS_Store
