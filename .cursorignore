@@ -5,20 +5,9 @@
 .dev.vars
 !.dev.vars.example
 
-# --- Dependencies & VCS ---
-node_modules/
+# --- VCS (hooks visible for agent sandbox) ---
 .git/
-
-# --- Build outputs ---
-dist/
-build/
-
-# --- Cloudflare local state ---
-.wrangler/
-
-# --- Lockfiles & logs ---
-package-lock.json
-*.log
+!.git/hooks/
 
 # --- IDE / OS noise ---
 .vscode/
