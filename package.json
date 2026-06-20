@@ -9,14 +9,16 @@
 		"test": "vitest"
 	},
 	"devDependencies": {
-		"@cloudflare/vitest-pool-workers": "^0.16.9",
+		"@cloudflare/vitest-pool-workers": "^0.16.18",
 		"vitest": "^4.1.0",
-		"wrangler": "^4.59.1"
+		"wrangler": "^4.103.0"
 	},
 	"dependencies": {
 		"hono": "^4.12.7"
 	},
 	"overrides": {
-		"esbuild": ">=0.28.1"
+		"esbuild": "0.28.1",
+		"undici": "7.28.0",
+		"ws": "8.21.0"
 	}
 }
