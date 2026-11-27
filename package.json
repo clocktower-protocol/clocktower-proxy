@@ -14,7 +14,7 @@
     "wrangler": "^4.153.0"
   },
   "dependencies": {
-    "hono": "^4.13.14"
+    "hono": "^4.13.23"
   },
   "overrides": {
     "esbuild": "0.28.1",
